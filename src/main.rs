@@ -1,7 +1,12 @@
-use bevy::prelude::*;
+use std::f32::consts::PI;
+
+use bevy::{input::mouse::MouseWheel, prelude::*};
 
 #[derive(Component)]
-struct Rotator;
+struct RotatorHorizontal;
+
+#[derive(Component)]
+struct RotatorVertical;
 
 #[derive(Component)]
 struct BoardPart;
@@ -32,8 +37,8 @@ struct MainPlugin;
 impl Plugin for MainPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(SelectedPiece(None));
-        app.add_systems(Startup, (setup_materials, create).chain());
-        app.add_systems(Update, (keyboard_update, update_textures));
+        app.add_systems(Startup, (setup_materials, init_scene, create_chess_pieces).chain());
+        app.add_systems(Update, (input_update, update_textures));
     }
 }
 
@@ -73,18 +78,40 @@ fn update_textures(
     }
 }
 
-fn create(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>, asset_server: Res<AssetServer>) {
+fn init_scene(mut commands: Commands) {
     commands.spawn((
         Transform::default(),
-        Rotator,
+        RotatorHorizontal,
         children![(
-            Camera3d::default(),
-            Transform::from_xyz(0.0, 6.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y)
+            Transform::default(),
+            RotatorVertical,
+            children![(
+                Camera3d::default(),
+                Transform::from_xyz(0.0, 0.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y)
+            )],
         )],
 
     ));
 
+    commands.spawn((
+        PointLight{..Default::default()},
+        Transform::from_xyz(2.0, 5.0, 2.0)
+    ));
+
+    commands.spawn((
+        PointLight{..Default::default()},
+        Transform::from_xyz(-3.0, 5.0, -4.0)
+    ));
+
+}
+
+fn create_chess_pieces(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>, asset_server: Res<AssetServer>){
     let pawn_handle = asset_server.load("models/pawn.glb#Scene0");
+    let rook_handle = asset_server.load("models/rook.glb#Scene0");
+    let knight_handle = asset_server.load("models/knight.glb#Scene0");
+    let bishop_handle = asset_server.load("models/bishop.glb#Scene0");
+    let king_handle = asset_server.load("models/king.glb#Scene0");
+    let queen_handle = asset_server.load("models/queen.glb#Scene0");
     
 
     let board_size = 8;
@@ -100,21 +127,42 @@ fn create(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut material
             let board_part_y = (((board_size-1) as f32 + (board_size-1) as f32 * offset_size)/2.0) - (1.0 + offset_size) * col as f32;
 
             if row < 2 || row > 5 {
+
+                let mut chess_piece_transform = Transform::from_xyz(board_part_x, 0.55, board_part_y);
                     
                 let mut chess_piece = commands.spawn((
-                    SceneRoot(pawn_handle.clone()),
-                    Transform::from_xyz(board_part_x, 0.55, board_part_y),
                     ChessPieces,
                 ));
 
-                chess_piece.observe(handle_click);
-
-                if row < 2 {
-                    chess_piece.insert(PieceColor::White);
-                } else if row > 5 {
-                    chess_piece.insert(PieceColor::Black);
+                if row == 1 || row == 6{
+                    chess_piece.insert(SceneRoot(pawn_handle.clone()));
+                } else if col == 0 || col == 7{
+                    chess_piece.insert(SceneRoot(rook_handle.clone()));
+                } else if col == 1 || col == 6 {
+                    chess_piece.insert(SceneRoot(knight_handle.clone()));
+                } else if col == 2 || col == 5 {
+                    chess_piece.insert(SceneRoot(bishop_handle.clone()));
+                } else if col == 3 {
+                    chess_piece.insert(SceneRoot(king_handle.clone()));
+                } else if col == 4 {
+                    chess_piece.insert(SceneRoot(queen_handle.clone()));
                 }
 
+                
+                if row < 2 {
+                    chess_piece.insert(PieceColor::White);
+                    if col == 1 || col == 6 {
+                        chess_piece_transform.rotate_local_y(-PI/2.0);
+                    }
+                } else if row > 5 {
+                    chess_piece.insert(PieceColor::Black);
+                    if col == 1 || col == 6 {
+                        chess_piece_transform.rotate_local_y(PI/2.0);
+                    }
+                }
+                
+                chess_piece.observe(handle_click);
+                chess_piece.insert(chess_piece_transform);
 
             }
 
@@ -125,37 +173,74 @@ fn create(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut material
                 Transform::from_xyz(board_part_x, 0.0, board_part_y)
             )).observe(handle_click);
 
+            
+
         }
     }
-    
-
-    commands.spawn((
-        PointLight{..Default::default()},
-        Transform::from_xyz(2.0, 5.0, 2.0)
-    ));
-
 }
 
-fn keyboard_update(
-    mut rotator_query: Query<&mut Transform, (With<Rotator>, Without<Camera3d>)>,
-    mut camera_query: Query<&mut Transform, (With<Camera3d>, Without<Rotator>)>,
-    time: Res<Time>, keyboard_input: Res<ButtonInput<KeyCode>>,
+fn input_update(
+    mut set: ParamSet<(
+        Query<&mut Transform, With<RotatorHorizontal>>,
+        Query<&mut Transform, With<RotatorVertical>>,
+        Query<&mut Transform, With<Camera3d>>,
+    )>,
+    time: Res<Time>, 
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut scroll_events: MessageReader<MouseWheel>,
 ){
-    if let Ok(mut rotator) = rotator_query.single_mut() && let Ok(mut camera) = camera_query.single_mut() {
 
+
+    for mut rotator_h in set.p0().iter_mut() {
         if keyboard_input.pressed(KeyCode::KeyA) || keyboard_input.pressed(KeyCode::ArrowLeft) {
-            rotator.rotate_y(-2.0 * time.delta_secs());
-            
+        rotator_h.rotate_y(-2.0 * time.delta_secs());
+        
         } else if keyboard_input.pressed(KeyCode::KeyD) || keyboard_input.pressed(KeyCode::ArrowRight){
-            rotator.rotate_y(2.0 * time.delta_secs());
+            rotator_h.rotate_y(2.0 * time.delta_secs());
 
-        } if keyboard_input.pressed(KeyCode::KeyW) || keyboard_input.pressed(KeyCode::ArrowUp) {
-            camera.rotate_around(Vec3::ZERO, Quat::from_rotation_x(-2.0 * time.delta_secs()));
-
-        } else if keyboard_input.pressed(KeyCode::KeyS) || keyboard_input.pressed(KeyCode::ArrowDown){
-            camera.rotate_around(Vec3::ZERO, Quat::from_rotation_x(2.0 * time.delta_secs()));
         }
     }
+
+    for mut rotator_v in set.p1().iter_mut() {
+        if keyboard_input.pressed(KeyCode::KeyW) || keyboard_input.pressed(KeyCode::ArrowUp) {
+        rotator_v.rotate_x(-2.0 * time.delta_secs());
+
+        } else if keyboard_input.pressed(KeyCode::KeyS) || keyboard_input.pressed(KeyCode::ArrowDown){
+            rotator_v.rotate_x(2.0 * time.delta_secs());
+        }
+
+        if keyboard_input.pressed(KeyCode::KeyF) || keyboard_input.pressed(KeyCode::KeyJ) {
+            rotator_v.translation.x -= 6.0 * time.delta_secs();
+
+        } else if keyboard_input.pressed(KeyCode::KeyH) || keyboard_input.pressed(KeyCode::KeyL) {
+            rotator_v.translation.x += 6.0 * time.delta_secs();
+        }
+
+        if keyboard_input.pressed(KeyCode::KeyT) || keyboard_input.pressed(KeyCode::KeyI) {
+            rotator_v.translation.z -= 6.0 * time.delta_secs();
+
+        } else if keyboard_input.pressed(KeyCode::KeyG) || keyboard_input.pressed(KeyCode::KeyK) {
+            rotator_v.translation.z += 6.0 * time.delta_secs();
+        }
+    }
+
+    for mut camera in set.p2().iter_mut() {
+        if keyboard_input.pressed(KeyCode::Equal){
+            camera.translation.z -= 6.0 * time.delta_secs();
+
+        } else if keyboard_input.pressed(KeyCode::Minus){
+            camera.translation.z += 6.0 * time.delta_secs();
+
+        }  
+
+        for event in scroll_events.read() {
+            camera.translation.z -= (20.0 * event.y) * time.delta_secs();
+        }
+    }
+
+        
+
+        
 }
 
 fn handle_click(
@@ -190,13 +275,4 @@ fn handle_click(
             }
         }
     }
-    
-        
-        
-
 }
-
-
-
-
-
