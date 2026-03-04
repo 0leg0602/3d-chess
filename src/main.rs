@@ -46,7 +46,7 @@ impl Plugin for MainPlugin {
         app.insert_resource(SelectedPiece(None));
         app.insert_resource(Animation{target: None, final_location: None, is_finished: true});
         app.add_systems(Startup, (setup_materials, init_scene, create_chess_pieces).chain());
-        app.add_systems(Update, (input_update, update_textures, update_animation));
+        app.add_systems(Update, (update_input, update_textures, update_animation));
     }
 }
 
@@ -187,7 +187,7 @@ fn create_chess_pieces(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>,
     }
 }
 
-fn input_update(
+fn update_input(
     mut set: ParamSet<(
         Query<&mut Transform, With<RotatorHorizontal>>,
         Query<&mut Transform, With<RotatorVertical>>,
@@ -273,7 +273,7 @@ fn handle_click(
             commands.entity(hovered_entity).despawn();
         }
 
-        if let Ok([hover_transform, mut selected_transform]) = transform_query.get_many_mut([hovered_entity, selected_piece_enity]){
+        if let Ok(hover_transform) = transform_query.get_mut(hovered_entity){
             let mut final_vec = hover_transform.translation;
             final_vec.y = 0.55;
 
@@ -289,7 +289,7 @@ fn handle_click(
         if let Ok(ChessPieces) = chess_piece_query.get(hovered_entity) {
             selected_piece.0 = Some(hovered_entity);
             
-            if let Ok(mut hover_transform) = transform_query.get_mut(hovered_entity) {
+            if let Ok(hover_transform) = transform_query.get_mut(hovered_entity) {
                 
                 let mut final_vec = hover_transform.translation;
                 final_vec.y = 2.0;
@@ -297,7 +297,6 @@ fn handle_click(
                 animation.target = Some(hovered_entity);
                 animation.final_location = Some(final_vec);
                 animation.is_finished = false;
-                // hover_transform.translation.y = 2.0;
             }
         }
     }
