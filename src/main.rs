@@ -28,6 +28,16 @@
 //! However I was able to make it that pieces of the same color can not captures each other.
 //! 
 //! At any point during the game you can press backspace and move back to the menu and reset the board. 
+//! 
+//! Instead of Object-Oriented Programming bevy uses something completly different called Entity Component System
+//! 
+//! Let's say a scenario: we need a player and an enemy
+//! 
+//! In java oop what I would do is create a class named MovingCharacter and then assign relationship is-a to Player and Enemy 
+//! 
+//! In bevy ecs instead you create 3 components MovingCharacter, Player and Enemy, then you create Entity and insert into it Player and MovingCharacter and another Enitty and insert Enemy and MovingCharacter. 
+//! And you can change those at any point, so if you have a Statue which is stationary and then you want it to move you just insert a MovingCharacter component and you are done! In java this requires much complicated setup.
+//! 
 
 
 use std::f32::consts::PI;
