@@ -31,6 +31,9 @@ enum ButtonType {
 #[derive(Component)]
 struct MainMenuComponent;
 
+#[derive(Component)]
+struct GameComponent;
+
 #[derive(Resource)]
 struct SelectedPiece(Option<Entity>);
 
@@ -62,8 +65,9 @@ impl Plugin for MainPlugin {
         app.insert_resource(SelectedPiece(None));
         app.insert_resource(Animation{target: None, final_location: None, is_finished: true});
         app.init_state::<GameState>();
+        app.insert_state(GameState::Menu);
 
-        app.add_systems(Startup, (setup_materials, init_menu).chain());
+        app.add_systems(OnEnter(GameState::Menu), (remove_game, setup_materials, init_menu).chain());
 
         app.add_systems(OnEnter(GameState::Game), (remove_menu, init_scene, create_chess_pieces).chain());
         app.add_systems(Update, (update_input, update_textures, update_animation).run_if(in_state(GameState::Game)));
@@ -199,6 +203,12 @@ fn remove_menu(mut commands: Commands, menu_query: Query<Entity, With<MainMenuCo
     }
 }
 
+fn remove_game(mut commands: Commands, game_query: Query<Entity, With<GameComponent>>) {
+    for game_entity in game_query {
+        commands.entity(game_entity).despawn();
+    }
+}
+
 fn setup_materials(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
     commands.insert_resource(ChessMaterials{
         white: materials.add(Color::WHITE),
@@ -231,6 +241,7 @@ fn update_textures(
 fn init_scene(mut commands: Commands) {
     commands.spawn((
         Transform::default(),
+        GameComponent,
         RotatorHorizontal,
         children![(
             Transform::default(),
@@ -245,11 +256,13 @@ fn init_scene(mut commands: Commands) {
 
     commands.spawn((
         PointLight{..Default::default()},
+        GameComponent,
         Transform::from_xyz(2.0, 5.0, 2.0)
     ));
 
     commands.spawn((
         PointLight{..Default::default()},
+        GameComponent,
         Transform::from_xyz(-3.0, 5.0, -4.0)
     ));
 
@@ -282,6 +295,7 @@ fn create_chess_pieces(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>,
                     
                 let mut chess_piece = commands.spawn((
                     ChessPieces,
+                    GameComponent,
                 ));
 
                 if row == 1 || row == 6{
@@ -318,6 +332,7 @@ fn create_chess_pieces(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>,
 
             commands.spawn((
                 BoardPart,
+                GameComponent,
                 Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
                 MeshMaterial3d(materials.add(part_color)),
                 Transform::from_xyz(board_part_x, 0.0, board_part_y)
@@ -334,10 +349,14 @@ fn update_input(
         Query<&mut Transform, With<RotatorHorizontal>>,
         Query<&mut Transform, With<RotatorVertical>>,
         Query<&mut Transform, With<Camera3d>>,
+        Query<&mut Transform>,
     )>,
     time: Res<Time>, 
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut scroll_events: MessageReader<MouseWheel>,
+    mut game_state: ResMut<NextState<GameState>>,
+    mut selected_piece: ResMut<SelectedPiece>,
+    mut animation: ResMut<Animation>,
 ){
 
 
@@ -388,6 +407,25 @@ fn update_input(
         }
     }
 
+    if keyboard_input.just_pressed(KeyCode::Backspace) {
+        game_state.set(GameState::Menu);
+    }
+    if keyboard_input.just_pressed(KeyCode::Escape) {
+        if animation.is_finished {
+            if let Some(selected_piece_enity) = selected_piece.0 {
+                if let Ok(selected_piece_trasnform) = set.p3().get(selected_piece_enity) {
+                    let mut animation_vec = selected_piece_trasnform.translation;
+                    animation_vec.y = 0.55;
+                    animation.target = Some(selected_piece_enity);
+                    animation.final_location = Some(animation_vec);
+                    animation.is_finished = false;
+                    selected_piece.0 = None;
+
+                }
+            }
+        }
+    }
+
         
 
         
@@ -410,25 +448,28 @@ fn handle_click(
 
     let hovered_entity = trigger.event_target();
 
+    let mut hover_transform_vec = Vec3::ZERO;
+
+    if let Ok((_entity, hover_transform)) = transform_query.get_mut(hovered_entity){
+        hover_transform_vec = hover_transform.translation;
+    }
+
+    let mut entity_to_delete: Option<Entity> = None;
+
     
     if let Some(selected_piece_enity) = selected_piece.0 {
+
         if chess_piece_query.contains(hovered_entity) && selected_piece_enity != hovered_entity {
             match chess_piece_color_query.get_many([selected_piece_enity, hovered_entity]){
                 Ok([selected_piece_enity_color, hovered_piece_entity_color]) => {
                     if selected_piece_enity_color != hovered_piece_entity_color {
-                        commands.entity(hovered_entity).despawn_children();
+                        entity_to_delete = Some(hovered_entity)
                     } else {
                         return;
                     }
                 },
                 Err(_) => todo!(),
             }
-        }
-
-        let mut hover_transform_vec = Vec3::ZERO;
-
-        if let Ok((_entity, hover_transform)) = transform_query.get_mut(hovered_entity){
-            hover_transform_vec = hover_transform.translation;
         }
 
         for (entity, transform) in transform_query {
@@ -440,7 +481,7 @@ fn handle_click(
                 match chess_piece_color_query.get_many([selected_piece_enity, entity]){
                     Ok([selected_piece_enity_color, hovered_piece_entity_color]) => {
                         if selected_piece_enity_color != hovered_piece_entity_color {
-                            commands.entity(entity).despawn_children();
+                            entity_to_delete = Some(entity)
                         } else {
                             return;
                         }
@@ -448,6 +489,10 @@ fn handle_click(
                     Err(_) => todo!(),
                 }
             }
+        }
+
+        if let Some(real_entity_to_delete) = entity_to_delete {
+            commands.entity(real_entity_to_delete).despawn();
         }
 
         let mut final_vec = hover_transform_vec;
@@ -461,7 +506,7 @@ fn handle_click(
         selected_piece.0 = None;
 
     } else {
-        if let Ok(ChessPieces) = chess_piece_query.get(hovered_entity) {
+        if chess_piece_query.contains(hovered_entity) {
             selected_piece.0 = Some(hovered_entity);
             
             if let Ok((_entity, hover_transform)) = transform_query.get_mut(hovered_entity) {
@@ -504,7 +549,6 @@ fn update_animation(
             }
 
         }
-        // 
 
 
     }
